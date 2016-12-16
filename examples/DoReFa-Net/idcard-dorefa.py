@@ -22,7 +22,7 @@ DoReFa-Net: Training Low Bitwidth Convolutional Neural Networks with Low Bitwidt
 http://arxiv.org/abs/1606.06160
 
 The original experiements are performed on a proprietary framework.
-This is our attempt to reproduce it on tensorpack & TensorFlow.
+This is our attempt to reproduce it on tensorpack/tensorflow.
 
 Accuracy:
     Trained with 4 GPUs and (W,A,G)=(1,2,6), it can reach top-1 single-crop validation error of 51%,
@@ -40,8 +40,8 @@ Accuracy:
 Speed:
     About 2.8 iteration/s on 1 TitanX. (Each epoch is set to 10000 iterations)
 
-To Train, for example:
-    ./alexnet-dorefa.py --dorefa 1,2,6 --data PATH --gpu 0,1
+To Train:
+    ./alexnet-dorefa.py --dorefa 1,2,6 --data PATH --gpu 0,1,2,3
 
     PATH should look like:
     PATH/
@@ -51,7 +51,7 @@ To Train, for example:
           ...
         ...
       val/
-        ILSVRC2012_val_00000001.JPEG
+        IDCard2012_val_00000001.JPEG
         ...
 
     And you'll need the following to be able to fetch data efficiently
@@ -71,7 +71,7 @@ BATCH_SIZE = 64
 
 class Model(ModelDesc):
     def _get_input_vars(self):
-        return [InputVar(tf.float32, [None, 224, 224, 3], 'input'),
+        return [InputVar(tf.float32, [None, 32, 32, 3], 'input'),
                 InputVar(tf.int32, [None], 'label') ]
 
     def _build_graph(self, input_vars):
@@ -124,7 +124,7 @@ class Model(ModelDesc):
                 .Conv2D('conv4', 256, 3, split=2)
                 .apply(fg)
                 .BatchNorm('bn4')
-                .MaxPooling('pool4', 3, 2, padding='VALID')
+                .MaxPooling('pool4', 3, 2, padding='SAME')
                 .apply(activate)
 
                 .FullyConnected('fc0', 4096)
@@ -136,7 +136,7 @@ class Model(ModelDesc):
                 .apply(fg)
                 .BatchNorm('bnfc1')
                 .apply(nonlin)
-                .FullyConnected('fct', 1000, use_bias=True)())
+                .FullyConnected('fct', 6915, use_bias=True)())
         tf.get_variable = old_get_variable
 
         prob = tf.nn.softmax(logits, name='output')
@@ -158,11 +158,11 @@ class Model(ModelDesc):
 
 def get_data(dataset_name):
     isTrain = dataset_name == 'train'
-    ds = dataset.ILSVRC12(args.data, dataset_name, shuffle=isTrain)
+    ds = dataset.IDCard12(args.data, dataset_name, shuffle=isTrain)
 
-    meta = dataset.ILSVRCMeta()
-    pp_mean = meta.get_per_pixel_mean()
-    pp_mean_224 = pp_mean[16:-16,16:-16,:]
+    meta = dataset.IDCardMeta()
+    pp_mean = meta.get_per_pixel_mean((32,32))
+    pp_mean_224 = pp_mean[16:-16,16:-16]
 
     if isTrain:
         class Resize(imgaug.ImageAugmentor):
@@ -170,7 +170,7 @@ def get_data(dataset_name):
                 self._init(locals())
             def _augment(self, img, _):
                 h, w = img.shape[:2]
-                size = 224
+                size = 32
                 scale = self.rng.randint(size, 308) * 1.0 / min(h, w)
                 scaleX = scale * self.rng.uniform(0.85, 1.15)
                 scaleY = scale * self.rng.uniform(0.85, 1.15)
@@ -182,30 +182,30 @@ def get_data(dataset_name):
 
         augmentors = [
             Resize(),
-            imgaug.Rotation(max_deg=10),
+            # imgaug.Rotation(max_deg=10),
             imgaug.RandomApplyAug(imgaug.GaussianBlur(3), 0.5),
-            imgaug.Brightness(30, True),
+            # imgaug.Brightness(30, True),
             imgaug.Gamma(),
-            imgaug.Contrast((0.8,1.2), True),
-            imgaug.RandomCrop((224, 224)),
-            imgaug.RandomApplyAug(imgaug.JpegNoise(), 0.8),
-            imgaug.RandomApplyAug(imgaug.GaussianDeform(
-                [(0.2, 0.2), (0.2, 0.8), (0.8,0.8), (0.8,0.2)],
-                (224, 224), 0.2, 3), 0.1),
-            imgaug.Flip(horiz=True),
+            # imgaug.Contrast((0.8,1.2), True),
+            imgaug.RandomCrop((32, 32)),
+            # imgaug.RandomApplyAug(imgaug.JpegNoise(), 0.8),
+            # imgaug.RandomApplyAug(imgaug.GaussianDeform(
+            #     [(0.2, 0.2), (0.2, 0.8), (0.8,0.8), (0.8,0.2)],
+            #     (224, 224), 0.2, 3), 0.1),
+            # imgaug.Flip(horiz=True),
             imgaug.MapImage(lambda x: x - pp_mean_224),
         ]
     else:
         def resize_func(im):
             h, w = im.shape[:2]
             scale = 256.0 / min(h, w)
-            desSize = map(int, (max(224, min(w, scale * w)),\
-                                max(224, min(h, scale * h))))
+            desSize = map(int, (max(32, min(w, scale * w)),\
+                                max(32, min(h, scale * h))))
             im = cv2.resize(im, tuple(desSize), interpolation=cv2.INTER_CUBIC)
             return im
         augmentors = [
             imgaug.MapImage(resize_func),
-            imgaug.CenterCrop((224, 224)),
+            imgaug.CenterCrop((32, 32)),
             imgaug.MapImage(lambda x: x - pp_mean_224),
         ]
     ds = AugmentImageComponent(ds, augmentors)
@@ -250,7 +250,7 @@ def run_image(model, sess_init, inputs):
         output_names=['output']
     )
     predict_func = get_predict_func(pred_config)
-    meta = dataset.ILSVRCMeta()
+    meta = dataset.IDCardMeta()
     pp_mean = meta.get_per_pixel_mean()
     pp_mean_224 = pp_mean[16:-16,16:-16,:]
     words = meta.get_synset_words_1000()
@@ -285,7 +285,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', help='the physical ids of GPUs to use')
     parser.add_argument('--load', help='load a checkpoint, or a npy (given as the pretrained model)')
-    parser.add_argument('--data', help='ILSVRC dataset dir')
+    parser.add_argument('--data', help='IDCard dataset dir')
     parser.add_argument('--dorefa',
             help='number of bits for W,A,G, separated by comma', required=True)
     parser.add_argument('--run', help='run on a list of images with the pretrained model', nargs='*')
@@ -311,4 +311,4 @@ if __name__ == '__main__':
         config.session_init = SaverRestore(args.load)
     if args.gpu:
         config.nr_tower = len(args.gpu.split(','))
-    SyncMultiGPUTrainer(config).train()
+    AsyncMultiGPUTrainer(config).train()
